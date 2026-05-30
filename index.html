@@ -208,7 +208,23 @@ footer b{color:var(--azul)}
 .modal .mf{padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;background:#fafdfd}
 .coord-card .mini{display:flex;gap:10px;margin-top:12px;font-size:11px;color:var(--muted)}
 
-@media (max-width:980px){.col-8,.col-7,.col-6,.col-5,.col-4{grid-column:span 12}}
+/* ---------- COMISIONES ---------- */
+.com-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
+.com-box{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 16px;text-align:center}
+.com-box .cl{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.com-box .cv{font-family:'Sora';font-size:20px;font-weight:700}
+.com-box.c-emp .cv{color:var(--azul)}.com-box.c-ase .cv{color:var(--turquesa-d)}.com-box.c-coo .cv{color:var(--green)}
+.com-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.com-tbl thead th{background:var(--azul);color:#fff;padding:9px 12px;text-align:left;font-weight:600;white-space:nowrap}
+.com-tbl thead th.r{text-align:right}
+.com-tbl tbody td{padding:8px 12px;border-bottom:1px solid var(--line)}
+.com-tbl tbody td.r{text-align:right;font-variant-numeric:tabular-nums}
+.com-tbl tbody tr:nth-child(even){background:#fafdfd}
+.com-tbl tbody tr:hover{background:#eef9fb}
+.com-tbl tfoot td{padding:9px 12px;font-weight:700;border-top:2px solid var(--azul);background:#f4f8f9}
+.com-tbl tfoot td.r{text-align:right;font-variant-numeric:tabular-nums}
+.com-bar{height:6px;border-radius:4px;background:#e7f1f3;margin-top:5px;overflow:hidden}
+.com-bar span{display:block;height:100%;border-radius:4px;background:var(--turquesa)}
 @media print{
   header.topbar{position:static}.dropzone,.filters .chips,.tbl-tools .btn-x,.dz-reload{display:none!important}
   body{background:#fff}.panel,.kpi,.insights{box-shadow:none;border:1px solid #ccc}
@@ -335,6 +351,33 @@ footer b{color:var(--azul)}
         <h2><span class="dot" style="background:var(--amber)"></span>Asesores activos sin cierres en el período</h2>
         <div class="ph-sub">Están en tu hoja ASESORES pero no registran operaciones en lo que estás viendo. Útil para detectar quién no ha radicado (incluye los nuevos).</div>
         <div id="sinCierresList" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      </div>
+
+      <!-- COMISIONES -->
+      <div class="panel col-12" id="comPanel" style="display:none">
+        <h2><span class="dot" style="background:var(--green)"></span>Comisiones por asesor</h2>
+        <div class="ph-sub">Calculado con base en las columnas de comisiones del Excel. Respeta los filtros activos.</div>
+        <div class="com-summary">
+          <div class="com-box c-emp"><div class="cl">Empresa</div><div class="cv" id="comTotEmp">$0</div></div>
+          <div class="com-box c-ase"><div class="cl">Asesores</div><div class="cv" id="comTotAse">$0</div></div>
+          <div class="com-box c-coo"><div class="cl">Coordinadores</div><div class="cv" id="comTotCoo">$0</div></div>
+        </div>
+        <div class="tbl-scroll">
+          <table class="com-tbl">
+            <thead><tr>
+              <th>Asesor</th>
+              <th class="r">Ops</th>
+              <th class="r">Valor créditos</th>
+              <th class="r">Com. empresa</th>
+              <th class="r">Com. asesor</th>
+              <th class="r">Com. coordinador</th>
+              <th class="r">Total comisión</th>
+              <th style="width:120px">% del total empresa</th>
+            </tr></thead>
+            <tbody id="comTbody"></tbody>
+            <tfoot id="comTfoot"></tfoot>
+          </table>
+        </div>
       </div>
 
       <!-- TABLE -->
@@ -547,6 +590,7 @@ const CANON={
  'ESTADO':'estado','ASESOR':'asesor','TIPO DE ASESOR':'tipo_asesor','TIPO ASESOR':'tipo_asesor',
  'TIPO DE CREDITO':'tipo_credito','ORIGEN DE CLIENTE':'origen','ORIGEN':'origen',
  'VALOR CREDITO':'valor','VALOR DEL CREDITO':'valor',
+ 'RECOMPRA':'recompra','TOTAL PAGADO RECOMPRA':'total_recompra',
  'COMISION EMPRESA':'com_empresa','COMISION ASESOR':'com_asesor','COMISION COORDINADOR':'com_coord',
  'REMANENTE PENDIENTE':'remanente','FECHA DESEM CARTERA':'fecha_desem'
 };
@@ -596,10 +640,18 @@ function parseWorkbook(data){
         tipo_credito:cleanCat(idx.tipo_credito!==undefined?r[idx.tipo_credito]:null),
         origen:cleanCat(idx.origen!==undefined?r[idx.origen]:null),
         valor:idx.valor!==undefined?toNum(r[idx.valor]):0,
+        recompra:idx.recompra!==undefined?toNum(r[idx.recompra]):0,
+        total_recompra:idx.total_recompra!==undefined?toNum(r[idx.total_recompra]):0,
+        remanente:idx.remanente!==undefined?toNum(r[idx.remanente]):0,
         com_empresa:idx.com_empresa!==undefined?toNum(r[idx.com_empresa]):0,
         com_asesor:idx.com_asesor!==undefined?toNum(r[idx.com_asesor]):0,
         com_coord:idx.com_coord!==undefined?toNum(r[idx.com_coord]):0
       });
+      // BASE COMISION: si existe TOTAL PAGADO RECOMPRA (= VALOR - RECOMPRA ya calculado en Excel), usarlo.
+      // Si no existe (Libre Inversión, Compra de Cartera, etc.), usar VALOR CREDITO completo.
+      const last=out[out.length-1];
+      const totalPagado=last.total_recompra||0;
+      last.valorBase = totalPagado>0 ? totalPagado : last.valor;
     }
   });
   return out;
@@ -655,8 +707,8 @@ function getFiltered(){
 }
 
 /* ============================= AGREGADOS ============================= */
-function groupSum(d,key,valKey='valor'){
-  const m={}; d.forEach(r=>{const k=r[key]||'—';m[k]=(m[k]||0)+(r[valKey]||0);});
+function groupSum(d,key,valKey='valorBase'){
+  const m={}; d.forEach(r=>{const k=r[key]||'—';m[k]=(m[k]||0)+((valKey==='valorBase'?(r.valorBase||r.valor):r[valKey])||0);});
   return Object.entries(m).sort((a,b)=>b[1]-a[1]);
 }
 function groupCount(d,key){
@@ -681,6 +733,7 @@ function render(){
   renderPagaduriaChart(d);
   renderOrigenChart(d);
   renderTable(d);
+  renderComisiones(d);
   renderSinCierres(d);
 }
 
@@ -718,7 +771,7 @@ function infoRow(label,val,ops){
 }
 function renderCoord(){
   const d=getTimeFiltered();
-  const sum=arr=>arr.reduce((s,r)=>s+r.valor,0);
+  const sum=arr=>arr.reduce((s,r)=>s+(r.valorBase||r.valor),0);
   const A=r=>normStr(r.asesorA);
   const banco=arr=>arr.filter(r=>classifyEntity(r.entidad)==='BANCO');
   const fin=arr=>arr.filter(r=>classifyEntity(r.entidad)==='FINANCIERA');
@@ -764,6 +817,55 @@ function renderCoord(){
   document.getElementById('coordScope').textContent=txt;
 }
 
+function renderComisiones(d){
+  const panel=document.getElementById('comPanel');
+  const hasComData=d.some(r=>r.com_empresa>0||r.com_asesor>0||r.com_coord>0);
+  if(!hasComData){panel.style.display='none';return;}
+  panel.style.display='';
+  // totales globales
+  const totE=d.reduce((s,r)=>s+r.com_empresa,0);
+  const totA=d.reduce((s,r)=>s+r.com_asesor,0);
+  const totC=d.reduce((s,r)=>s+r.com_coord,0);
+  document.getElementById('comTotEmp').textContent=fmtMoney(totE);
+  document.getElementById('comTotAse').textContent=fmtMoney(totA);
+  document.getElementById('comTotCoo').textContent=fmtMoney(totC);
+  // por asesor
+  const byA={};
+  d.forEach(r=>{
+    const k=r.asesorA||'—';
+    if(!byA[k])byA[k]={ops:0,valor:0,valorBase:0,emp:0,ase:0,coo:0};
+    byA[k].ops++;byA[k].valor+=r.valor;byA[k].valorBase+=(r.valorBase||r.valor);
+    byA[k].emp+=r.com_empresa;byA[k].ase+=r.com_asesor;byA[k].coo+=r.com_coord;
+  });
+  const rows=Object.entries(byA)
+    .map(([nm,v])=>({nm,...v,tot:v.emp+v.ase+v.coo}))
+    .filter(r=>r.emp>0||r.ase>0||r.coo>0)
+    .sort((a,b)=>b.emp-a.emp);
+  const maxEmp=Math.max(...rows.map(r=>r.emp),1);
+  document.getElementById('comTbody').innerHTML=rows.length
+    ? rows.map(r=>`<tr>
+        <td><b>${r.nm}</b></td>
+        <td class="r">${r.ops}</td>
+        <td class="r">${fmtFull(r.valorBase)}</td>
+        <td class="r">${fmtFull(r.emp)}</td>
+        <td class="r">${r.ase>0?fmtFull(r.ase):'<span style="color:var(--muted)">—</span>'}</td>
+        <td class="r">${r.coo>0?fmtFull(r.coo):'<span style="color:var(--muted)">—</span>'}</td>
+        <td class="r"><b>${fmtFull(r.tot)}</b></td>
+        <td><div class="com-bar"><span style="width:${Math.round(r.emp/maxEmp*100)}%"></span></div><div style="font-size:10px;color:var(--muted);margin-top:3px">${totE>0?Math.round(r.emp/totE*100):0}%</div></td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="empty">Sin datos de comisiones en este período</td></tr>';
+  document.getElementById('comTfoot').innerHTML=`<tr>
+    <td><b>TOTAL</b></td>
+    <td class="r"><b>${d.length}</b></td>
+    <td class="r"><b>${fmtFull(d.reduce((s,r)=>s+r.valor,0))}</b></td>
+    <td class="r"><b>${fmtFull(totE)}</b></td>
+    <td class="r"><b>${fmtFull(totA)}</b></td>
+    <td class="r"><b>${fmtFull(totC)}</b></td>
+    <td class="r"><b>${fmtFull(totE+totA+totC)}</b></td>
+    <td></td>
+  </tr>`;
+}
+
 function renderSinCierres(d){
   const panel=document.getElementById('sinCierresPanel');
   if(!ROSTER.length){panel.style.display='none';return;}
@@ -778,14 +880,14 @@ function renderSinCierres(d){
 
 function renderKPIs(d){
   const ops=d.length;
-  const valor=d.reduce((s,r)=>s+r.valor,0);
+  const valor=d.reduce((s,r)=>s+(r.valorBase||r.valor),0);
   const comE=d.reduce((s,r)=>s+r.com_empresa,0);
   const comA=d.reduce((s,r)=>s+r.com_asesor,0);
   const comC=d.reduce((s,r)=>s+r.com_coord,0);
   const ticket=ops?valor/ops:0;
   const desem=d.filter(r=>r.estado==='DESEMBOLSADO');
   const pend=d.filter(r=>r.estado!=='DESEMBOLSADO');
-  const valDesem=desem.reduce((s,r)=>s+r.valor,0);
+  const valDesem=desem.reduce((s,r)=>s+(r.valorBase||r.valor),0);
   const html=[
     {c:'',l:'Operaciones',v:ops,s:`${desem.length} desembolsadas`},
     {c:'a2',l:'Valor total',v:fmtMoney(valor),s:fmtFull(valor)},
@@ -857,7 +959,7 @@ const baseOpts=(money=true)=>({
 
 function renderMesChart(d){
   const meses=[...new Set(d.map(r=>r.mes))].sort((a,b)=>(MONTHS.indexOf(a)>=0?MONTHS.indexOf(a):99)-(MONTHS.indexOf(b)>=0?MONTHS.indexOf(b):99));
-  const valor=meses.map(m=>d.filter(r=>r.mes===m).reduce((s,r)=>s+r.valor,0));
+  const valor=meses.map(m=>d.filter(r=>r.mes===m).reduce((s,r)=>s+(r.valorBase||r.valor),0));
   const ops=meses.map(m=>d.filter(r=>r.mes===m).length);
   charts.mes=new Chart(document.getElementById('chMes'),{
     data:{labels:meses.map(m=>m.replace(' 2026','').replace(' 2025','')),
@@ -920,7 +1022,8 @@ const COLS=[
   {k:'entidad',t:'Entidad'},
   {k:'tipoent',t:'Tipo',fmt:r=>{const t=classifyEntity(r.entidad);return `<span class="pill ${t==='BANCO'?'vis':'des'}">${t}</span>`;}},
   {k:'pagaduria',t:'Pagaduría'},
-  {k:'valor',t:'Valor',fmt:r=>fmtFull(r.valor),num:true},
+  {k:'valor',t:'Valor crédito',fmt:r=>fmtFull(r.valor),num:true},
+  {k:'valorBase',t:'Base comisión',fmt:r=>{const diff=r.valor!==r.valorBase;return `<span style="${diff?'color:var(--turquesa-d);font-weight:600':''}">${fmtFull(r.valorBase)}</span>${diff?'<span style="font-size:10px;color:var(--muted);margin-left:4px">▼</span>':''}`;}},
   {k:'com_empresa',t:'Com. empresa',fmt:r=>fmtFull(r.com_empresa),num:true},
   {k:'mes',t:'Mes'}
 ];
